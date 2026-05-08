@@ -2,7 +2,8 @@ CC = gcc
 CFLAGS = -Wall -Wextra -Isrc
 LDFLAGS = -lpthread
 
-SRC = src/main.c src/buffer.c src/producer.c src/consumer.c
+SRC = src/main.c src/buffer.c src/producer.c src/consumer.c src/config.c
+
 TARGET = main
 
 all:

@@ -4,26 +4,55 @@
 #include "producer.h"
 #include "buffer.h"
 #include <pthread.h>
-extern Buffer sharedBuffer;
-extern pthread_mutex_t mutex;
-extern int running; // from main
-void* producerFunction(void* arg) {
- int producerId = *(int*)arg;
+#include <time.h>
+extern Buffer sharedBuffer;     // from main
+extern pthread_mutex_t mutex;   // from main
+extern int running;             // from main
+extern pthread_cond_t notFull;  // from main
+extern pthread_cond_t notEmpty; // from main
+extern int totalProduced;
+extern int producerWaitCount;
+extern int producerSleep; // from config.h
+extern pthread_mutex_t secondMutex;
+extern time_t lastActivityTime;
+void *producerFunction(void *arg)
+{
+
+    int producerId = *(int *)arg;
     int item = 1;
 
-    while (running) {
+    while (running)
+    {
         pthread_mutex_lock(&mutex);
-
-        if (insertItem(&sharedBuffer, item) == 0) {
-          printf("Producer P%d produced: %d\n", producerId, item);
-          printBuffer(&sharedBuffer);
-            item++;
-        } else {
+        sleep(1);
+        pthread_mutex_lock(&secondMutex);
+        while (sharedBuffer.count == BUFFER_SIZE && running)
+        {
+            producerWaitCount++;
             printf("Producer P%d waiting. Buffer is full.\n", producerId);
+
+            pthread_cond_wait(&notFull, &mutex);
         }
+
+        if (!running)
+        {
+            pthread_mutex_unlock(&mutex);
+            break;
+        }
+
+        insertItem(&sharedBuffer, item);
+        totalProduced++;
+        lastActivityTime = time(NULL);
+        printf("Producer P%d produced: %d\n", producerId, item);
+        printBuffer(&sharedBuffer);
+
+        item++;
+
+        pthread_cond_signal(&notEmpty);
+        pthread_mutex_unlock(&secondMutex);
         pthread_mutex_unlock(&mutex);
 
-        sleep(1);
+        sleep(producerSleep);
     }
 
     return NULL;

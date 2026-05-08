@@ -1,6 +1,6 @@
 #ifndef BUFFER_H
 #define BUFFER_H
-
+#include <pthread.h>
 #define BUFFER_SIZE 5
 
 typedef struct {
