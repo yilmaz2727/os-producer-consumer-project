@@ -1,0 +1,6 @@
+producers=2
+consumers=10
+runtime=60
+producer_sleep=100
+consumer_sleep=10
+deadlock_mode=0

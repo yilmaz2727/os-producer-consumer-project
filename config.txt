@@ -3,3 +3,4 @@ consumers=2
 runtime=10
 producer_sleep=2
 consumer_sleep=1
+deadlock_mode=1

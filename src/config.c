@@ -14,7 +14,7 @@ void loadConfig(const char* filename, Config* config) {
         config->runtime = 10;
         config->producerSleep = 2;
         config->consumerSleep = 1;
-
+        config->deadlockMode = 0;
         return;
     }
 
@@ -34,6 +34,9 @@ void loadConfig(const char* filename, Config* config) {
         } else if (strcmp(key, "consumer_sleep") == 0) {
             config->consumerSleep = value;
         }
+        else if (strcmp(key, "deadlock_mode") == 0) {
+    config->deadlockMode = value;
+}
     }
 
     fclose(file);

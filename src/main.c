@@ -19,6 +19,7 @@ int running = 1;
 
 int producerSleep = 2;
 int consumerSleep = 1;
+int deadlockMode=0;
 int totalProduced = 0;
 int totalConsumed = 0;
 int producerWaitCount = 0;
@@ -46,13 +47,21 @@ void* deadlockMonitor(void* arg) {
 
     return NULL;
 }
-int main() {
+int main(int argc, char *argv[]) {
 
     Config config;
-    loadConfig("config.txt", &config);
+   const char* configFile = "config.txt";
+
+if (argc > 1) {
+    configFile = argv[1];
+}
+
+loadConfig(configFile, &config);
+    
 
     producerSleep = config.producerSleep;
     consumerSleep = config.consumerSleep;
+    deadlockMode=config.deadlockMode;
 
     pthread_t* producers = malloc(sizeof(pthread_t) * config.producerCount);
     pthread_t* consumers = malloc(sizeof(pthread_t) * config.consumerCount);

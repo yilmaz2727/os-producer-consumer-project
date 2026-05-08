@@ -7,6 +7,7 @@ typedef struct {
     int runtime;
     int producerSleep;
     int consumerSleep;
+    int deadlockMode;
 } Config;
 
 void loadConfig(const char* filename, Config* config);

@@ -5,6 +5,7 @@
 #include "buffer.h"
 #include <pthread.h>
 #include <time.h>
+extern int deadlockMode;
 extern Buffer sharedBuffer;     // from main
 extern pthread_mutex_t mutex;   // from main
 extern int running;             // from main
@@ -24,8 +25,12 @@ void *producerFunction(void *arg)
     while (running)
     {
         pthread_mutex_lock(&mutex);
-        sleep(1);
-        pthread_mutex_lock(&secondMutex);
+
+        if (deadlockMode)
+        {
+            sleep(1);
+            pthread_mutex_lock(&secondMutex);
+        }
         while (sharedBuffer.count == BUFFER_SIZE && running)
         {
             producerWaitCount++;
@@ -49,7 +54,11 @@ void *producerFunction(void *arg)
         item++;
 
         pthread_cond_signal(&notEmpty);
-        pthread_mutex_unlock(&secondMutex);
+        if (deadlockMode)
+        {
+            pthread_mutex_unlock(&secondMutex);
+        }
+
         pthread_mutex_unlock(&mutex);
 
         sleep(producerSleep);
