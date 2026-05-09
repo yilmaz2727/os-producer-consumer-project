@@ -5,20 +5,21 @@
 #include "buffer.h"
 #include <pthread.h>
 #include <time.h>
+
 extern int deadlockMode;
-extern Buffer sharedBuffer;     // from main
-extern pthread_mutex_t mutex;   // from main
-extern int running;             // from main
-extern pthread_cond_t notFull;  // from main
-extern pthread_cond_t notEmpty; // from main
+extern Buffer sharedBuffer;
+extern pthread_mutex_t mutex;
+extern pthread_mutex_t secondMutex;
+extern int running;
+extern pthread_cond_t notFull;
+extern pthread_cond_t notEmpty;
 extern int totalProduced;
 extern int producerWaitCount;
-extern int producerSleep; // from config.h
-extern pthread_mutex_t secondMutex;
+extern int producerSleep;
 extern time_t lastActivityTime;
+
 void *producerFunction(void *arg)
 {
-
     int producerId = *(int *)arg;
     int item = 1;
 
@@ -29,8 +30,18 @@ void *producerFunction(void *arg)
         if (deadlockMode)
         {
             sleep(1);
-            pthread_mutex_lock(&secondMutex);
+
+            if (pthread_mutex_trylock(&secondMutex) != 0)
+            {
+                printf("Producer P%d could not acquire secondMutex. Resource contention detected.\n", producerId);
+
+                pthread_mutex_unlock(&mutex);
+
+                sleep(1);
+                continue;
+            }
         }
+
         while (sharedBuffer.count == BUFFER_SIZE && running)
         {
             producerWaitCount++;
@@ -42,18 +53,27 @@ void *producerFunction(void *arg)
         if (!running)
         {
             pthread_mutex_unlock(&mutex);
+
+            if (deadlockMode)
+            {
+                pthread_mutex_unlock(&secondMutex);
+            }
+
             break;
         }
 
         insertItem(&sharedBuffer, item);
+
         totalProduced++;
         lastActivityTime = time(NULL);
+
         printf("Producer P%d produced: %d\n", producerId, item);
         printBuffer(&sharedBuffer);
 
         item++;
 
         pthread_cond_signal(&notEmpty);
+
         if (deadlockMode)
         {
             pthread_mutex_unlock(&secondMutex);

@@ -1,23 +1,25 @@
 #include <stdio.h>
 #include <unistd.h>
 #include <pthread.h>
+#include <time.h>
 #include "consumer.h"
 #include "buffer.h"
-#include <time.h>
+
 extern time_t lastActivityTime;
 extern pthread_cond_t notFull;
 extern pthread_cond_t notEmpty;
 extern Buffer sharedBuffer;
 extern pthread_mutex_t mutex;
-extern int running; // form main
+extern pthread_mutex_t secondMutex;
+
+extern int running;
 extern int totalConsumed;
 extern int consumerWaitCount;
-extern int consumerSleep; // from config.h
-extern pthread_mutex_t secondMutex;
+extern int consumerSleep;
 extern int deadlockMode;
+
 void *consumerFunction(void *arg)
 {
-
     int consumerId = *(int *)arg;
     int item;
 
@@ -26,15 +28,23 @@ void *consumerFunction(void *arg)
         if (deadlockMode)
         {
             pthread_mutex_lock(&secondMutex);
-
             sleep(1);
 
-            pthread_mutex_lock(&mutex);
+            if (pthread_mutex_trylock(&mutex) != 0)
+            {
+                printf("Consumer C%d could not acquire mutex. Resource contention detected.\n", consumerId);
+
+                pthread_mutex_unlock(&secondMutex);
+
+                sleep(1);
+                continue;
+            }
         }
         else
         {
             pthread_mutex_lock(&mutex);
         }
+
         while (sharedBuffer.count == 0 && running)
         {
             consumerWaitCount++;
@@ -45,16 +55,25 @@ void *consumerFunction(void *arg)
         if (!running)
         {
             pthread_mutex_unlock(&mutex);
+
+            if (deadlockMode)
+            {
+                pthread_mutex_unlock(&secondMutex);
+            }
+
             break;
         }
 
         removeItem(&sharedBuffer, &item);
+
         totalConsumed++;
         lastActivityTime = time(NULL);
+
         printf("Consumer C%d consumed: %d\n", consumerId, item);
         printBuffer(&sharedBuffer);
 
         pthread_cond_signal(&notFull);
+
         pthread_mutex_unlock(&mutex);
 
         if (deadlockMode)

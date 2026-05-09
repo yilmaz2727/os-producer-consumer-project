@@ -13,19 +13,22 @@ pthread_mutex_t secondMutex;
 pthread_mutex_t mutex;
 pthread_cond_t notFull;
 pthread_cond_t notEmpty;
+
 time_t lastActivityTime;
+
 int deadlockDetected = 0;
 int running = 1;
 
 int producerSleep = 2;
 int consumerSleep = 1;
-int deadlockMode=0;
+int deadlockMode = 0;
+
 int totalProduced = 0;
 int totalConsumed = 0;
 int producerWaitCount = 0;
 int consumerWaitCount = 0;
-void* deadlockMonitor(void* arg) {
 
+void* deadlockMonitor(void* arg) {
     (void)arg;
 
     while (running) {
@@ -33,7 +36,7 @@ void* deadlockMonitor(void* arg) {
 
         time_t currentTime = time(NULL);
 
-        if (difftime(currentTime, lastActivityTime) >= 5) {
+        if (deadlockMode && difftime(currentTime, lastActivityTime) >= 5) {
             deadlockDetected = 1;
 
             printf("\n===== DEADLOCK DETECTED =====\n");
@@ -41,36 +44,47 @@ void* deadlockMonitor(void* arg) {
             printf("Possible circular wait or blocked threads detected.\n");
             printf("=============================\n");
 
-            exit(1);
+            running = 0;
+
+            pthread_cond_broadcast(&notFull);
+            pthread_cond_broadcast(&notEmpty);
+
+            break;
         }
     }
 
     return NULL;
 }
+
 int main(int argc, char *argv[]) {
-
     Config config;
-   const char* configFile = "config.txt";
+    const char* configFile = "config.txt";
 
-if (argc > 1) {
-    configFile = argv[1];
-}
+    if (argc > 1) {
+        configFile = argv[1];
+    }
 
-loadConfig(configFile, &config);
-    
+    loadConfig(configFile, &config);
 
     producerSleep = config.producerSleep;
     consumerSleep = config.consumerSleep;
-    deadlockMode=config.deadlockMode;
+    deadlockMode = config.deadlockMode;
 
     pthread_t* producers = malloc(sizeof(pthread_t) * config.producerCount);
     pthread_t* consumers = malloc(sizeof(pthread_t) * config.consumerCount);
-pthread_t monitorThread;
+    pthread_t monitorThread;
+
     int* producerIds = malloc(sizeof(int) * config.producerCount);
     int* consumerIds = malloc(sizeof(int) * config.consumerCount);
 
     if (producers == NULL || consumers == NULL || producerIds == NULL || consumerIds == NULL) {
         printf("Memory allocation failed.\n");
+
+        free(producers);
+        free(consumers);
+        free(producerIds);
+        free(consumerIds);
+
         return 1;
     }
 
@@ -85,8 +99,11 @@ pthread_t monitorThread;
            config.producerCount,
            config.consumerCount,
            config.runtime);
-lastActivityTime = time(NULL);
-pthread_create(&monitorThread, NULL, deadlockMonitor, NULL);
+
+    lastActivityTime = time(NULL);
+
+    pthread_create(&monitorThread, NULL, deadlockMonitor, NULL);
+
     for (int i = 0; i < config.producerCount; i++) {
         producerIds[i] = i + 1;
         pthread_create(&producers[i], NULL, producerFunction, &producerIds[i]);
@@ -101,10 +118,11 @@ pthread_create(&monitorThread, NULL, deadlockMonitor, NULL);
 
     pthread_mutex_lock(&mutex);
     running = 0;
-    pthread_join(monitorThread, NULL);
     pthread_cond_broadcast(&notFull);
     pthread_cond_broadcast(&notEmpty);
     pthread_mutex_unlock(&mutex);
+
+    pthread_join(monitorThread, NULL);
 
     for (int i = 0; i < config.producerCount; i++) {
         pthread_join(producers[i], NULL);
@@ -114,22 +132,26 @@ pthread_create(&monitorThread, NULL, deadlockMonitor, NULL);
         pthread_join(consumers[i], NULL);
     }
 
+    printf("System finished.\n");
+
+    printf("\n===== PERFORMANCE METRICS =====\n");
+    printf("Total produced: %d\n", totalProduced);
+    printf("Total consumed: %d\n", totalConsumed);
+    printf("Producer wait count: %d\n", producerWaitCount);
+    printf("Consumer wait count: %d\n", consumerWaitCount);
+    printf("Throughput: %.2f item/sec\n", (double)totalConsumed / config.runtime);
+    printf("Deadlock detected: %s\n", deadlockDetected ? "YES" : "NO");
+    printf("================================\n");
+
     pthread_mutex_destroy(&mutex);
+    pthread_mutex_destroy(&secondMutex);
     pthread_cond_destroy(&notFull);
     pthread_cond_destroy(&notEmpty);
-pthread_mutex_destroy(&secondMutex);
+
     free(producers);
     free(consumers);
     free(producerIds);
     free(consumerIds);
 
-    printf("System finished.\n");
-printf("\n===== PERFORMANCE METRICS =====\n");
-printf("Total produced: %d\n", totalProduced);
-printf("Total consumed: %d\n", totalConsumed);
-printf("Producer wait count: %d\n", producerWaitCount);
-printf("Consumer wait count: %d\n", consumerWaitCount);
-printf("Throughput: %.2f item/sec\n", (double)totalConsumed / config.runtime);
-printf("================================\n");
     return 0;
 }
