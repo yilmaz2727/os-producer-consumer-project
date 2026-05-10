@@ -1,68 +1,72 @@
 #include <stdio.h>
-#include <stdlib.h>
 #include <unistd.h>
-#include "producer.h"
-#include "buffer.h"
 #include <pthread.h>
 #include <time.h>
-extern int deadlockMode;
-extern Buffer sharedBuffer;     // from main
-extern pthread_mutex_t mutex;   // from main
-extern int running;             // from main
-extern pthread_cond_t notFull;  // from main
-extern pthread_cond_t notEmpty; // from main
+#include "producer.h"
+#include "buffer.h"
+#include "config.h"
+
+extern time_t lastActivityTime;
+extern Buffer bufferA;
+extern Buffer bufferB;
+extern int running;
 extern int totalProduced;
 extern int producerWaitCount;
-extern int producerSleep; // from config.h
-extern pthread_mutex_t secondMutex;
-extern time_t lastActivityTime;
+extern int deadlockMode; // Bunu geri getirdik
+
 void *producerFunction(void *arg)
 {
-
-    int producerId = *(int *)arg;
+    ThreadConfig *tConfig = (ThreadConfig *)arg;
     int item = 1;
+    Buffer *outBuf = (tConfig->outBuffer == 'A') ? &bufferA : &bufferB;
 
     while (running)
     {
-        pthread_mutex_lock(&mutex);
-
-        if (deadlockMode)
-        {
+        // --- KASTİ DEADLOCK SİMÜLASYONU ---
+        if (deadlockMode) {
+            pthread_mutex_lock(&bufferA.mutex);
+            printf("Producer P%d locked Buffer A (Deadlock test)\n", tConfig->id);
             sleep(1);
-            pthread_mutex_lock(&secondMutex);
+            printf("Producer P%d trying to lock Buffer B...\n", tConfig->id);
+            pthread_mutex_lock(&bufferB.mutex);
+            
+            pthread_mutex_unlock(&bufferB.mutex);
+            pthread_mutex_unlock(&bufferA.mutex);
+            sleep(1);
+            continue;
         }
-        while (sharedBuffer.count == BUFFER_SIZE && running)
+        // -----------------------------------
+
+        printf("Producer P%d is trying to Lock Buffer %c...\n", tConfig->id, outBuf->name);
+        pthread_mutex_lock(&outBuf->mutex);
+        printf("Producer P%d has Lock on Buffer %c.\n", tConfig->id, outBuf->name);
+
+        while (outBuf->count == outBuf->capacity && running)
         {
             producerWaitCount++;
-            printf("Producer P%d waiting. Buffer is full.\n", producerId);
-
-            pthread_cond_wait(&notFull, &mutex);
+            pthread_cond_wait(&outBuf->notFull, &outBuf->mutex);
         }
 
         if (!running)
         {
-            pthread_mutex_unlock(&mutex);
+            pthread_mutex_unlock(&outBuf->mutex);
             break;
         }
 
-        insertItem(&sharedBuffer, item);
+        insertItem(outBuf, item);
         totalProduced++;
         lastActivityTime = time(NULL);
-        printf("Producer P%d produced: %d\n", producerId, item);
-        printBuffer(&sharedBuffer);
+
+        printf("Producer P%d produced: %d to Buffer %c\n", tConfig->id, item, outBuf->name);
+        printBuffer(outBuf);
 
         item++;
 
-        pthread_cond_signal(&notEmpty);
-        if (deadlockMode)
-        {
-            pthread_mutex_unlock(&secondMutex);
-        }
+        pthread_cond_signal(&outBuf->notEmpty);
+        pthread_mutex_unlock(&outBuf->mutex);
+        printf("Producer P%d released Lock on Buffer %c.\n", tConfig->id, outBuf->name);
 
-        pthread_mutex_unlock(&mutex);
-
-        sleep(producerSleep);
+        usleep(tConfig->sleepTime * 1000);
     }
-
     return NULL;
 }

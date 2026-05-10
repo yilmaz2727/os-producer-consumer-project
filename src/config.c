@@ -1,43 +1,83 @@
 #include <stdio.h>
 #include <string.h>
+#include <stdlib.h>
 #include "config.h"
 
 void loadConfig(const char* filename, Config* config) {
+    // Varsayılan değerler
+    config->bufferASize = 5;
+    config->bufferBSize = 5;
+    config->runtime = 60;
+    config->deadlockMode = 0;
+    config->producerCount = 0;
+    config->consumerCount = 0;
 
     FILE* file = fopen(filename, "r");
-
     if (file == NULL) {
-        printf("Config file could not be opened. Using default values.\n");
-
-        config->producerCount = 2;
-        config->consumerCount = 2;
-        config->runtime = 10;
-        config->producerSleep = 2;
-        config->consumerSleep = 1;
-        config->deadlockMode = 0;
+        printf("Config file (%s) could not be opened. Using default values.\n", filename);
         return;
     }
 
-    char key[50];
-    int value;
+    char line[256];
+    while (fgets(line, sizeof(line), file)) {
+        // Yorum satırlarını (// sonrası) yoksay
+        char *comment = strstr(line, "//");
+        if (comment) *comment = '\0';
 
-    while (fscanf(file, "%49[^=]=%d\n", key, &value) == 2) {
+        int size, time, id;
+        char buf1, buf2;
 
-        if (strcmp(key, "producers") == 0) {
-            config->producerCount = value;
-        } else if (strcmp(key, "consumers") == 0) {
-            config->consumerCount = value;
-        } else if (strcmp(key, "runtime") == 0) {
-            config->runtime = value;
-        } else if (strcmp(key, "producer_sleep") == 0) {
-            config->producerSleep = value;
-        } else if (strcmp(key, "consumer_sleep") == 0) {
-            config->consumerSleep = value;
+        // Buffer A ve B Boyutları: Örn: A[22]
+        if (sscanf(line, "A[%d]", &size) == 1) {
+            config->bufferASize = size;
+        } 
+        else if (sscanf(line, "B[%d]", &size) == 1) {
+            config->bufferBSize = size;
+        } 
+        // Çalışma Süresi: Örn: t:20
+        else if (sscanf(line, "t:%d", &time) == 1) {
+            config->runtime = time;
+        } 
+        // Üretici Yönlendirmesi: Örn: P1>A
+        else if (sscanf(line, "P%d>%c", &id, &buf1) == 2) {
+            config->producers[config->producerCount].id = id;
+            config->producers[config->producerCount].outBuffer = buf1;
+            config->producers[config->producerCount].inBuffer = 0;
+            config->producerCount++;
+        } 
+        // Tüketici - Dairesel Bağımlılık (Hem okur hem yazar): Örn: B>C3>A
+        else if (sscanf(line, "%c>C%d>%c", &buf1, &id, &buf2) == 3) {
+            config->consumers[config->consumerCount].id = id;
+            config->consumers[config->consumerCount].inBuffer = buf1;
+            config->consumers[config->consumerCount].outBuffer = buf2;
+            config->consumerCount++;
+        } 
+        // Normal Tüketici: Örn: A>C1
+        else if (sscanf(line, "%c>C%d", &buf1, &id) == 2) {
+            config->consumers[config->consumerCount].id = id;
+            config->consumers[config->consumerCount].inBuffer = buf1;
+            config->consumers[config->consumerCount].outBuffer = 0;
+            config->consumerCount++;
+        } 
+        // Üretici Uyku Süresi: Örn: P1:2
+        else if (sscanf(line, "P%d:%d", &id, &time) == 2) {
+            for(int i = 0; i < config->producerCount; i++) {
+                if(config->producers[i].id == id) config->producers[i].sleepTime = time;
+            }
+        } 
+        // Tüketici Uyku Süresi: Örn: C1:2
+        else if (sscanf(line, "C%d:%d", &id, &time) == 2) {
+            for(int i = 0; i < config->consumerCount; i++) {
+                if(config->consumers[i].id == id) config->consumers[i].sleepTime = time;
+            }
         }
-        else if (strcmp(key, "deadlock_mode") == 0) {
-    config->deadlockMode = value;
-}
+        // Deadlock Modu için kendi eklememiz (Opsiyonel)
+        else if (sscanf(line, "deadlock_mode=%d", &time) == 1) {
+            config->deadlockMode = time;
+        }
     }
-
     fclose(file);
+
+    printf("Configuration loaded. Producers: %d, Consumers: %d, Runtime: %ds\n", 
+           config->producerCount, config->consumerCount, config->runtime);
 }

@@ -1,6 +1,10 @@
-producers=2
-consumers=2
-runtime=60
-producer_sleep=10
-consumer_sleep=10
-deadlock_mode=0
+A[6]
+t:60
+P1>A
+P2>A
+A>C1
+A>C2
+P1:10
+P2:10
+C1:10
+C2:10

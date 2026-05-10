@@ -1,6 +1,15 @@
-producers=2
-consumers=2
-runtime=10
-producer_sleep=2
-consumer_sleep=1
-deadlock_mode=1
+A[10] //size of shared buffer A
+B[5] //size of shared buffer B
+t:20 //defines runtime. app will exit after 20 sec
+P1>A //producer with id P1 produces component A
+P2>A
+P3>B
+A>C1 //consumer with id C1 consumes component A
+B>C2
+B>C3>A //consumer C3 consumes B, produces A
+P1:20 // ms
+P2:30
+P3:20
+C1:20
+C2:30
+C3:20

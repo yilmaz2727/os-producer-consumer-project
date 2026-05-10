@@ -8,31 +8,27 @@
 #include "consumer.h"
 #include "config.h"
 
-Buffer sharedBuffer;
-pthread_mutex_t secondMutex;
-pthread_mutex_t mutex;
-pthread_cond_t notFull;
-pthread_cond_t notEmpty;
+// Global Çoklu Buffer Tanımlamaları
+Buffer bufferA;
+Buffer bufferB;
+
 time_t lastActivityTime;
 int deadlockDetected = 0;
 int running = 1;
+int deadlockMode = 0;
 
-int producerSleep = 2;
-int consumerSleep = 1;
-int deadlockMode=0;
 int totalProduced = 0;
 int totalConsumed = 0;
 int producerWaitCount = 0;
 int consumerWaitCount = 0;
+
 void* deadlockMonitor(void* arg) {
-
     (void)arg;
-
     while (running) {
         sleep(1);
-
         time_t currentTime = time(NULL);
 
+        // 5 saniye işlem yapılmazsa deadlock uyarısı
         if (difftime(currentTime, lastActivityTime) >= 5) {
             deadlockDetected = 1;
 
@@ -41,70 +37,62 @@ void* deadlockMonitor(void* arg) {
             printf("Possible circular wait or blocked threads detected.\n");
             printf("=============================\n");
 
-            exit(1);
+            running = 0;
+            // Threadleri kilitlerinden kurtarmak için uyandır
+            pthread_cond_broadcast(&bufferA.notFull);
+            pthread_cond_broadcast(&bufferA.notEmpty);
+            pthread_cond_broadcast(&bufferB.notFull);
+            pthread_cond_broadcast(&bufferB.notEmpty);
+            break;
         }
     }
-
     return NULL;
 }
+
 int main(int argc, char *argv[]) {
-
     Config config;
-   const char* configFile = "config.txt";
+    const char* configFile = "config.txt";
 
-if (argc > 1) {
-    configFile = argv[1];
-}
+    if (argc > 1) {
+        configFile = argv[1];
+    }
 
-loadConfig(configFile, &config);
-    
+    loadConfig(configFile, &config);
+    deadlockMode = config.deadlockMode;
 
-    producerSleep = config.producerSleep;
-    consumerSleep = config.consumerSleep;
-    deadlockMode=config.deadlockMode;
+    // A ve B Buffer'larını dinamik boyutlarla başlat
+    initializeBuffer(&bufferA, 'A', config.bufferASize > 0 ? config.bufferASize : 5);
+    initializeBuffer(&bufferB, 'B', config.bufferBSize > 0 ? config.bufferBSize : 5);
 
     pthread_t* producers = malloc(sizeof(pthread_t) * config.producerCount);
     pthread_t* consumers = malloc(sizeof(pthread_t) * config.consumerCount);
-pthread_t monitorThread;
-    int* producerIds = malloc(sizeof(int) * config.producerCount);
-    int* consumerIds = malloc(sizeof(int) * config.consumerCount);
+    pthread_t monitorThread;
 
-    if (producers == NULL || consumers == NULL || producerIds == NULL || consumerIds == NULL) {
-        printf("Memory allocation failed.\n");
-        return 1;
-    }
+    lastActivityTime = time(NULL);
 
-    initializeBuffer(&sharedBuffer);
+    pthread_create(&monitorThread, NULL, deadlockMonitor, NULL);
 
-    pthread_mutex_init(&mutex, NULL);
-    pthread_mutex_init(&secondMutex, NULL);
-    pthread_cond_init(&notFull, NULL);
-    pthread_cond_init(&notEmpty, NULL);
-
-    printf("System started with %d producer(s), %d consumer(s), runtime %d second(s).\n",
-           config.producerCount,
-           config.consumerCount,
-           config.runtime);
-lastActivityTime = time(NULL);
-pthread_create(&monitorThread, NULL, deadlockMonitor, NULL);
+    // Threadleri id göndererek değil, direkt konfigürasyon objesini göndererek başlatıyoruz.
     for (int i = 0; i < config.producerCount; i++) {
-        producerIds[i] = i + 1;
-        pthread_create(&producers[i], NULL, producerFunction, &producerIds[i]);
+        pthread_create(&producers[i], NULL, producerFunction, &config.producers[i]);
     }
 
     for (int i = 0; i < config.consumerCount; i++) {
-        consumerIds[i] = i + 1;
-        pthread_create(&consumers[i], NULL, consumerFunction, &consumerIds[i]);
+        pthread_create(&consumers[i], NULL, consumerFunction, &config.consumers[i]);
     }
 
+    // Çalışma süresi kadar ana thread'i beklet
     sleep(config.runtime);
 
-    pthread_mutex_lock(&mutex);
-    running = 0;
+    running = 0; // Sistemi durdur
+    
+    // Tüm bekleyen thread'leri broadcast ile uyandırıp kilitlerinden düşür
+    pthread_cond_broadcast(&bufferA.notFull);
+    pthread_cond_broadcast(&bufferA.notEmpty);
+    pthread_cond_broadcast(&bufferB.notFull);
+    pthread_cond_broadcast(&bufferB.notEmpty);
+
     pthread_join(monitorThread, NULL);
-    pthread_cond_broadcast(&notFull);
-    pthread_cond_broadcast(&notEmpty);
-    pthread_mutex_unlock(&mutex);
 
     for (int i = 0; i < config.producerCount; i++) {
         pthread_join(producers[i], NULL);
@@ -114,22 +102,20 @@ pthread_create(&monitorThread, NULL, deadlockMonitor, NULL);
         pthread_join(consumers[i], NULL);
     }
 
-    pthread_mutex_destroy(&mutex);
-    pthread_cond_destroy(&notFull);
-    pthread_cond_destroy(&notEmpty);
-pthread_mutex_destroy(&secondMutex);
+    printf("System finished.\n");
+    printf("\n===== PERFORMANCE METRICS =====\n");
+    printf("Total produced: %d\n", totalProduced);
+    printf("Total consumed: %d\n", totalConsumed);
+    printf("Producer wait count: %d\n", producerWaitCount);
+    printf("Consumer wait count: %d\n", consumerWaitCount);
+    printf("Throughput: %.2f item/sec\n", (double)totalConsumed / config.runtime);
+    printf("Deadlock detected: %s\n", deadlockDetected ? "YES" : "NO");
+    printf("================================\n");
+
+    destroyBuffer(&bufferA);
+    destroyBuffer(&bufferB);
     free(producers);
     free(consumers);
-    free(producerIds);
-    free(consumerIds);
 
-    printf("System finished.\n");
-printf("\n===== PERFORMANCE METRICS =====\n");
-printf("Total produced: %d\n", totalProduced);
-printf("Total consumed: %d\n", totalConsumed);
-printf("Producer wait count: %d\n", producerWaitCount);
-printf("Consumer wait count: %d\n", consumerWaitCount);
-printf("Throughput: %.2f item/sec\n", (double)totalConsumed / config.runtime);
-printf("================================\n");
     return 0;
 }
