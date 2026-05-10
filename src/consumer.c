@@ -5,6 +5,7 @@
 #include "consumer.h"
 #include "buffer.h"
 #include "config.h"
+#include "common/utils.h"
 
 extern time_t lastActivityTime;
 extern Buffer bufferA;
@@ -13,7 +14,7 @@ extern int running;
 extern int totalConsumed;
 extern int consumerWaitCount;
 extern int totalProduced;
-extern int deadlockMode; // Bunu geri getirdik
+extern int deadlockMode; 
 
 void *consumerFunction(void *arg)
 {
@@ -29,22 +30,34 @@ void *consumerFunction(void *arg)
     {
         // --- KASTİ DEADLOCK SİMÜLASYONU ---
         if (deadlockMode) {
+            track_waiting('C', tConfig->id, 'B');
             pthread_mutex_lock(&bufferB.mutex);
-            printf("Consumer C%d locked Buffer B (Deadlock test)\n", tConfig->id);
+            track_acquired('C', tConfig->id, 'B');
+            log_event("Consumer", tConfig->id, "locked (Deadlock test)", 'B');
+            
             sleep(1);
-            printf("Consumer C%d trying to lock Buffer A...\n", tConfig->id);
+            
+            track_waiting('C', tConfig->id, 'A');
+            log_event("Consumer", tConfig->id, "is waiting for", 'A');
             pthread_mutex_lock(&bufferA.mutex);
+            track_acquired('C', tConfig->id, 'A');
             
             pthread_mutex_unlock(&bufferA.mutex);
+            track_released('C', tConfig->id, 'A');
             pthread_mutex_unlock(&bufferB.mutex);
+            track_released('C', tConfig->id, 'B');
             sleep(1);
             continue;
         }
         // -----------------------------------
 
-        printf("Consumer C%d is trying to Lock Buffer %c...\n", tConfig->id, inBuf->name);
+        log_event("Consumer", tConfig->id, "is trying to lock", inBuf->name);
+        track_waiting('C', tConfig->id, inBuf->name);
+
         pthread_mutex_lock(&inBuf->mutex);
-        printf("Consumer C%d has Lock on Buffer %c.\n", tConfig->id, inBuf->name);
+
+        track_acquired('C', tConfig->id, inBuf->name);
+        log_event("Consumer", tConfig->id, "has lock on", inBuf->name);
 
         while (inBuf->count == 0 && running)
         {
@@ -54,6 +67,7 @@ void *consumerFunction(void *arg)
 
         if (!running) {
             pthread_mutex_unlock(&inBuf->mutex);
+            track_released('C', tConfig->id, inBuf->name);
             break;
         }
 
@@ -65,15 +79,22 @@ void *consumerFunction(void *arg)
         printBuffer(inBuf);
 
         pthread_cond_signal(&inBuf->notFull);
+        
         pthread_mutex_unlock(&inBuf->mutex);
-        printf("Consumer C%d released Lock on Buffer %c.\n", tConfig->id, inBuf->name);
+        track_released('C', tConfig->id, inBuf->name);
+        log_event("Consumer", tConfig->id, "released lock on", inBuf->name);
 
         usleep(tConfig->sleepTime * 1000); 
 
+        // Eğer bu tüketici aynı zamanda yeni bir veri üretecekse (Circular dependency)
         if (outBuf != NULL && running) {
-            printf("Consumer C%d is trying to Lock Buffer %c (to produce)...\n", tConfig->id, outBuf->name);
+            log_event("Consumer", tConfig->id, "is trying to lock (to produce)", outBuf->name);
+            track_waiting('C', tConfig->id, outBuf->name);
+
             pthread_mutex_lock(&outBuf->mutex);
-            printf("Consumer C%d has Lock on Buffer %c.\n", tConfig->id, outBuf->name);
+
+            track_acquired('C', tConfig->id, outBuf->name);
+            log_event("Consumer", tConfig->id, "has lock on", outBuf->name);
 
             while (outBuf->count == outBuf->capacity && running) {
                 pthread_cond_wait(&outBuf->notFull, &outBuf->mutex);
@@ -88,7 +109,8 @@ void *consumerFunction(void *arg)
             }
 
             pthread_mutex_unlock(&outBuf->mutex);
-            printf("Consumer C%d released Lock on Buffer %c.\n", tConfig->id, outBuf->name);
+            track_released('C', tConfig->id, outBuf->name);
+            log_event("Consumer", tConfig->id, "released lock on", outBuf->name);
         }
     }
     return NULL;

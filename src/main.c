@@ -7,6 +7,7 @@
 #include "producer.h"
 #include "consumer.h"
 #include "config.h"
+#include "common/utils.h"
 
 // Global Çoklu Buffer Tanımlamaları
 Buffer bufferA;
@@ -25,19 +26,16 @@ int consumerWaitCount = 0;
 void* deadlockMonitor(void* arg) {
     (void)arg;
     while (running) {
-        sleep(1);
-        time_t currentTime = time(NULL);
-
-        // 5 saniye işlem yapılmazsa deadlock uyarısı
-        if (difftime(currentTime, lastActivityTime) >= 5) {
+        usleep(500000); // Saniyede 2 kez kontrol et
+        
+        if (check_deadlock()) { // utils.c içerisindeki gerçek döngüsel bekleme (circular wait) kontrolü
             deadlockDetected = 1;
 
-            printf("\n===== DEADLOCK DETECTED =====\n");
-            printf("No producer/consumer activity for 5 seconds.\n");
-            printf("Possible circular wait or blocked threads detected.\n");
-            printf("=============================\n");
+            printf("\n===== CIRCULAR WAIT DEADLOCK DETECTED =====\n");
+            printf("Thread A is waiting for Resource B, and Thread B is waiting for Resource A!\n");
+            printf("===========================================\n");
 
-            running = 0;
+            running = 0; // Sistemi durdur
             // Threadleri kilitlerinden kurtarmak için uyandır
             pthread_cond_broadcast(&bufferA.notFull);
             pthread_cond_broadcast(&bufferA.notEmpty);
@@ -72,7 +70,6 @@ int main(int argc, char *argv[]) {
 
     pthread_create(&monitorThread, NULL, deadlockMonitor, NULL);
 
-    // Threadleri id göndererek değil, direkt konfigürasyon objesini göndererek başlatıyoruz.
     for (int i = 0; i < config.producerCount; i++) {
         pthread_create(&producers[i], NULL, producerFunction, &config.producers[i]);
     }
