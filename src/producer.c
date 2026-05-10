@@ -15,6 +15,10 @@ extern int totalProduced;
 extern int producerWaitCount;
 extern int deadlockMode; 
 
+// YENİ: Süre metrikleri için extern tanımlamaları
+extern long long totalProducerWaitTimeMs;
+extern long long totalProducerBlockTimeMs;
+
 void *producerFunction(void *arg)
 {
     ThreadConfig *tConfig = (ThreadConfig *)arg;
@@ -23,7 +27,6 @@ void *producerFunction(void *arg)
 
     while (running)
     {
-        // --- KASTİ DEADLOCK SİMÜLASYONU ---
         if (deadlockMode) {
             track_waiting('P', tConfig->id, 'A');
             pthread_mutex_lock(&bufferA.mutex);
@@ -44,20 +47,28 @@ void *producerFunction(void *arg)
             sleep(1);
             continue;
         }
-        // -----------------------------------
 
         log_event("Producer", tConfig->id, "is trying to lock", outBuf->name);
         track_waiting('P', tConfig->id, outBuf->name);
 
+        // YENİ: Lock alma süresini ölç (Blocking Time)
+        long long startLock = get_current_time_ms();
         pthread_mutex_lock(&outBuf->mutex);
+        long long endLock = get_current_time_ms();
+        __atomic_add_fetch(&totalProducerBlockTimeMs, (endLock - startLock), __ATOMIC_SEQ_CST);
 
         track_acquired('P', tConfig->id, outBuf->name);
         log_event("Producer", tConfig->id, "has lock on", outBuf->name);
 
         while (outBuf->count == outBuf->capacity && running)
         {
-            producerWaitCount++;
+            __atomic_add_fetch(&producerWaitCount, 1, __ATOMIC_SEQ_CST);
+            
+            // YENİ: Condition wait (Bekleme) süresini ölç (Waiting Time)
+            long long startWait = get_current_time_ms();
             pthread_cond_wait(&outBuf->notFull, &outBuf->mutex);
+            long long endWait = get_current_time_ms();
+            __atomic_add_fetch(&totalProducerWaitTimeMs, (endWait - startWait), __ATOMIC_SEQ_CST);
         }
 
         if (!running)
@@ -68,7 +79,7 @@ void *producerFunction(void *arg)
         }
 
         insertItem(outBuf, item);
-        totalProduced++;
+        __atomic_add_fetch(&totalProduced, 1, __ATOMIC_SEQ_CST); // Thread-safe artırım
         lastActivityTime = time(NULL);
 
         printf("Producer P%d produced: %d to Buffer %c\n", tConfig->id, item, outBuf->name);

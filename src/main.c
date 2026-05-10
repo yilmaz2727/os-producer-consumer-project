@@ -23,12 +23,18 @@ int totalConsumed = 0;
 int producerWaitCount = 0;
 int consumerWaitCount = 0;
 
+// YENİ: Süreleri tutacak global değişkenler (Milisaniye cinsinden)
+long long totalProducerWaitTimeMs = 0;
+long long totalConsumerWaitTimeMs = 0;
+long long totalProducerBlockTimeMs = 0;
+long long totalConsumerBlockTimeMs = 0;
+
 void* deadlockMonitor(void* arg) {
     (void)arg;
     while (running) {
         usleep(500000); // Saniyede 2 kez kontrol et
         
-        if (check_deadlock()) { // utils.c içerisindeki gerçek döngüsel bekleme (circular wait) kontrolü
+        if (check_deadlock()) { 
             deadlockDetected = 1;
 
             printf("\n===== CIRCULAR WAIT DEADLOCK DETECTED =====\n");
@@ -36,7 +42,6 @@ void* deadlockMonitor(void* arg) {
             printf("===========================================\n");
 
             running = 0; // Sistemi durdur
-            // Threadleri kilitlerinden kurtarmak için uyandır
             pthread_cond_broadcast(&bufferA.notFull);
             pthread_cond_broadcast(&bufferA.notEmpty);
             pthread_cond_broadcast(&bufferB.notFull);
@@ -58,7 +63,6 @@ int main(int argc, char *argv[]) {
     loadConfig(configFile, &config);
     deadlockMode = config.deadlockMode;
 
-    // A ve B Buffer'larını dinamik boyutlarla başlat
     initializeBuffer(&bufferA, 'A', config.bufferASize > 0 ? config.bufferASize : 5);
     initializeBuffer(&bufferB, 'B', config.bufferBSize > 0 ? config.bufferBSize : 5);
 
@@ -78,12 +82,10 @@ int main(int argc, char *argv[]) {
         pthread_create(&consumers[i], NULL, consumerFunction, &config.consumers[i]);
     }
 
-    // Çalışma süresi kadar ana thread'i beklet
     sleep(config.runtime);
 
-    running = 0; // Sistemi durdur
+    running = 0; 
     
-    // Tüm bekleyen thread'leri broadcast ile uyandırıp kilitlerinden düşür
     pthread_cond_broadcast(&bufferA.notFull);
     pthread_cond_broadcast(&bufferA.notEmpty);
     pthread_cond_broadcast(&bufferB.notFull);
@@ -99,6 +101,10 @@ int main(int argc, char *argv[]) {
         pthread_join(consumers[i], NULL);
     }
 
+    // Ortalamaları hesapla
+    double avgProducerWaitTime = producerWaitCount > 0 ? (double)totalProducerWaitTimeMs / producerWaitCount : 0.0;
+    double avgConsumerWaitTime = consumerWaitCount > 0 ? (double)totalConsumerWaitTimeMs / consumerWaitCount : 0.0;
+
     printf("System finished.\n");
     printf("\n===== PERFORMANCE METRICS =====\n");
     printf("Total produced: %d\n", totalProduced);
@@ -106,6 +112,15 @@ int main(int argc, char *argv[]) {
     printf("Producer wait count: %d\n", producerWaitCount);
     printf("Consumer wait count: %d\n", consumerWaitCount);
     printf("Throughput: %.2f item/sec\n", (double)totalConsumed / config.runtime);
+    
+    // YENİ: Ortalama Bekleme Süreleri (Average Waiting Time)
+    printf("Avg. Producer Wait Time: %.2f ms\n", avgProducerWaitTime);
+    printf("Avg. Consumer Wait Time: %.2f ms\n", avgConsumerWaitTime);
+    
+    // YENİ: İş Parçacığı Bloklanma Süreleri (Thread Blocking Time)
+    printf("Total Producer Block Time: %lld ms\n", totalProducerBlockTimeMs);
+    printf("Total Consumer Block Time: %lld ms\n", totalConsumerBlockTimeMs);
+    
     printf("Deadlock detected: %s\n", deadlockDetected ? "YES" : "NO");
     printf("================================\n");
 

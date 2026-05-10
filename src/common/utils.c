@@ -31,6 +31,10 @@ void track_acquired(char t_type, int t_id, char resource) {
 }
 
 void track_released(char t_type, int t_id, char resource) {
+
+    (void)t_type; 
+    (void)t_id;
+
     pthread_mutex_lock(&track_mutex);
     if (resource == 'A') { holder_A_type = 0; holder_A_id = 0; }
     else if (resource == 'B') { holder_B_type = 0; holder_B_id = 0; }

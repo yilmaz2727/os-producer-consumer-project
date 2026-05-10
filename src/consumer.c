@@ -16,6 +16,10 @@ extern int consumerWaitCount;
 extern int totalProduced;
 extern int deadlockMode; 
 
+// YENİ: Süre metrikleri için extern tanımlamaları
+extern long long totalConsumerWaitTimeMs;
+extern long long totalConsumerBlockTimeMs;
+
 void *consumerFunction(void *arg)
 {
     ThreadConfig *tConfig = (ThreadConfig *)arg;
@@ -28,7 +32,6 @@ void *consumerFunction(void *arg)
 
     while (running)
     {
-        // --- KASTİ DEADLOCK SİMÜLASYONU ---
         if (deadlockMode) {
             track_waiting('C', tConfig->id, 'B');
             pthread_mutex_lock(&bufferB.mutex);
@@ -49,20 +52,28 @@ void *consumerFunction(void *arg)
             sleep(1);
             continue;
         }
-        // -----------------------------------
 
         log_event("Consumer", tConfig->id, "is trying to lock", inBuf->name);
         track_waiting('C', tConfig->id, inBuf->name);
 
+        // YENİ: Lock alma süresini ölç
+        long long startLock = get_current_time_ms();
         pthread_mutex_lock(&inBuf->mutex);
+        long long endLock = get_current_time_ms();
+        __atomic_add_fetch(&totalConsumerBlockTimeMs, (endLock - startLock), __ATOMIC_SEQ_CST);
 
         track_acquired('C', tConfig->id, inBuf->name);
         log_event("Consumer", tConfig->id, "has lock on", inBuf->name);
 
         while (inBuf->count == 0 && running)
         {
-            consumerWaitCount++;
+            __atomic_add_fetch(&consumerWaitCount, 1, __ATOMIC_SEQ_CST);
+            
+            // YENİ: Condition wait süresini ölç
+            long long startWait = get_current_time_ms();
             pthread_cond_wait(&inBuf->notEmpty, &inBuf->mutex);
+            long long endWait = get_current_time_ms();
+            __atomic_add_fetch(&totalConsumerWaitTimeMs, (endWait - startWait), __ATOMIC_SEQ_CST);
         }
 
         if (!running) {
@@ -72,7 +83,7 @@ void *consumerFunction(void *arg)
         }
 
         removeItem(inBuf, &item);
-        totalConsumed++;
+        __atomic_add_fetch(&totalConsumed, 1, __ATOMIC_SEQ_CST); // Thread-safe artırım
         lastActivityTime = time(NULL);
         
         printf("Consumer C%d consumed: %d from Buffer %c\n", tConfig->id, item, inBuf->name);
@@ -91,18 +102,26 @@ void *consumerFunction(void *arg)
             log_event("Consumer", tConfig->id, "is trying to lock (to produce)", outBuf->name);
             track_waiting('C', tConfig->id, outBuf->name);
 
+            // YENİ: İkinci Buffer için lock süresini ölç
+            long long startOutLock = get_current_time_ms();
             pthread_mutex_lock(&outBuf->mutex);
+            long long endOutLock = get_current_time_ms();
+            __atomic_add_fetch(&totalConsumerBlockTimeMs, (endOutLock - startOutLock), __ATOMIC_SEQ_CST);
 
             track_acquired('C', tConfig->id, outBuf->name);
             log_event("Consumer", tConfig->id, "has lock on", outBuf->name);
 
             while (outBuf->count == outBuf->capacity && running) {
+                // YENİ: İkinci Buffer için wait süresini ölç
+                long long startOutWait = get_current_time_ms();
                 pthread_cond_wait(&outBuf->notFull, &outBuf->mutex);
+                long long endOutWait = get_current_time_ms();
+                __atomic_add_fetch(&totalConsumerWaitTimeMs, (endOutWait - startOutWait), __ATOMIC_SEQ_CST);
             }
 
             if(running) {
                 insertItem(outBuf, item + 100);
-                totalProduced++; 
+                __atomic_add_fetch(&totalProduced, 1, __ATOMIC_SEQ_CST); 
                 printf("Consumer C%d generated and pushed %d to Buffer %c\n", tConfig->id, item+100, outBuf->name);
                 printBuffer(outBuf);
                 pthread_cond_signal(&outBuf->notEmpty);
