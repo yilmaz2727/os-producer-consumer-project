@@ -10,10 +10,10 @@
 extern time_t lastActivityTime;
 extern Buffer bufferA;
 extern Buffer bufferB;
-extern int running;
+extern volatile int running;
 extern int totalProduced;
 extern int producerWaitCount;
-extern int deadlockMode; 
+extern int deadlockMode;
 
 // YENİ: Süre metrikleri için extern tanımlamaları
 extern long long totalProducerWaitTimeMs;
@@ -27,23 +27,47 @@ void *producerFunction(void *arg)
 
     while (running)
     {
-        if (deadlockMode) {
+        if (deadlockMode)
+        {
             track_waiting('P', tConfig->id, 'A');
-            pthread_mutex_lock(&bufferA.mutex);
+
+            if (pthread_mutex_trylock(&bufferA.mutex) != 0)
+            {
+                usleep(100000);
+                continue;
+            }
+
             track_acquired('P', tConfig->id, 'A');
             log_event("Producer", tConfig->id, "locked (Deadlock test)", 'A');
-            
+
             sleep(1);
-            
+
             track_waiting('P', tConfig->id, 'B');
             log_event("Producer", tConfig->id, "is waiting for", 'B');
-            pthread_mutex_lock(&bufferB.mutex);
+
+            if (pthread_mutex_trylock(&bufferB.mutex) != 0)
+            {
+                while (running && pthread_mutex_trylock(&bufferB.mutex) != 0)
+                {
+                    usleep(100000);
+                }
+
+                if (!running)
+                {
+                    pthread_mutex_unlock(&bufferA.mutex);
+                    track_released('P', tConfig->id, 'A');
+                    break;
+                }
+            }
+
             track_acquired('P', tConfig->id, 'B');
-            
+
             pthread_mutex_unlock(&bufferB.mutex);
             track_released('P', tConfig->id, 'B');
+
             pthread_mutex_unlock(&bufferA.mutex);
             track_released('P', tConfig->id, 'A');
+
             sleep(1);
             continue;
         }
@@ -63,7 +87,7 @@ void *producerFunction(void *arg)
         while (outBuf->count == outBuf->capacity && running)
         {
             __atomic_add_fetch(&producerWaitCount, 1, __ATOMIC_SEQ_CST);
-            
+
             // YENİ: Condition wait (Bekleme) süresini ölç (Waiting Time)
             long long startWait = get_current_time_ms();
             pthread_cond_wait(&outBuf->notFull, &outBuf->mutex);
@@ -88,7 +112,7 @@ void *producerFunction(void *arg)
         item++;
 
         pthread_cond_signal(&outBuf->notEmpty);
-        
+
         pthread_mutex_unlock(&outBuf->mutex);
         track_released('P', tConfig->id, outBuf->name);
         log_event("Producer", tConfig->id, "released lock on", outBuf->name);
